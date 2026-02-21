@@ -1,8 +1,9 @@
 import { Link, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Menu, X, Camera, Film, Palette, MessageCircle, Search, GraduationCap } from "lucide-react";
+import { Menu, X, Camera, Film, Palette, MessageCircle, Search, GraduationCap, LogOut } from "lucide-react";
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useAuth } from "@/contexts/AuthContext";
 
 const navLinks = [
   { to: "/photography", label: "Photography", icon: Camera },
@@ -15,6 +16,7 @@ const navLinks = [
 export default function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
+  const { user, signOut } = useAuth();
 
   return (
     <header className="sticky top-0 z-50 border-b border-border bg-card/80 backdrop-blur-md">
@@ -42,18 +44,22 @@ export default function Navbar() {
         </nav>
 
         <div className="hidden items-center gap-2 md:flex">
-          <Button variant="ghost" size="sm" asChild>
-            <Link to="/login">Log in</Link>
-          </Button>
-          <Button size="sm" asChild>
-            <Link to="/register">Sign up</Link>
-          </Button>
+          {user ? (
+            <>
+              <span className="text-sm text-muted-foreground">{user.email}</span>
+              <Button variant="ghost" size="sm" onClick={signOut}>
+                <LogOut className="mr-1 h-4 w-4" /> Log out
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="ghost" size="sm" asChild><Link to="/login">Log in</Link></Button>
+              <Button size="sm" asChild><Link to="/register">Sign up</Link></Button>
+            </>
+          )}
         </div>
 
-        <button
-          className="text-foreground md:hidden"
-          onClick={() => setMobileOpen(!mobileOpen)}
-        >
+        <button className="text-foreground md:hidden" onClick={() => setMobileOpen(!mobileOpen)}>
           {mobileOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
         </button>
       </div>
@@ -83,12 +89,20 @@ export default function Navbar() {
                 </Link>
               ))}
               <div className="mt-2 flex gap-2 border-t border-border pt-3">
-                <Button variant="outline" size="sm" className="flex-1" asChild>
-                  <Link to="/login" onClick={() => setMobileOpen(false)}>Log in</Link>
-                </Button>
-                <Button size="sm" className="flex-1" asChild>
-                  <Link to="/register" onClick={() => setMobileOpen(false)}>Sign up</Link>
-                </Button>
+                {user ? (
+                  <Button variant="outline" size="sm" className="flex-1" onClick={() => { signOut(); setMobileOpen(false); }}>
+                    <LogOut className="mr-1 h-4 w-4" /> Log out
+                  </Button>
+                ) : (
+                  <>
+                    <Button variant="outline" size="sm" className="flex-1" asChild>
+                      <Link to="/login" onClick={() => setMobileOpen(false)}>Log in</Link>
+                    </Button>
+                    <Button size="sm" className="flex-1" asChild>
+                      <Link to="/register" onClick={() => setMobileOpen(false)}>Sign up</Link>
+                    </Button>
+                  </>
+                )}
               </div>
             </div>
           </motion.div>
