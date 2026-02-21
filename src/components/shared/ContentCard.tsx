@@ -9,6 +9,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 
 interface CardComment {
   id: string;
@@ -72,6 +73,7 @@ export default function ContentCard({
 }: ContentCardProps) {
   const [showComments, setShowComments] = useState(false);
   const [commentText, setCommentText] = useState("");
+  const [showImagePreview, setShowImagePreview] = useState(false);
 
   const toggleComments = async () => {
     const next = !showComments;
@@ -93,14 +95,28 @@ export default function ContentCard({
       transition={{ duration: 0.4, delay: index * 0.1 }}
       className="overflow-hidden rounded-xl border border-border bg-card shadow-card transition-all duration-300 hover:shadow-card-hover"
     >
-      <div className="group relative aspect-[4/3] overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setShowImagePreview(true)}
+        aria-label={`Open full image preview for ${title}`}
+        className="group relative block aspect-[4/3] w-full cursor-zoom-in overflow-hidden text-left"
+      >
         <img
           src={image}
           alt={title}
           className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-foreground/60 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
-      </div>
+      </button>
+
+      <Dialog open={showImagePreview} onOpenChange={setShowImagePreview}>
+        <DialogContent className="max-w-6xl border-none bg-transparent p-0 shadow-none [&>button]:right-2 [&>button]:top-2 [&>button]:rounded-full [&>button]:bg-black/60 [&>button]:text-white [&>button]:opacity-100">
+          <DialogTitle className="sr-only">{title}</DialogTitle>
+          <div className="rounded-xl bg-black/90 p-2">
+            <img src={image} alt={title} className="max-h-[88vh] w-full rounded-lg object-contain" />
+          </div>
+        </DialogContent>
+      </Dialog>
       <div className="p-4">
         <div className="flex items-start justify-between gap-2">
           <div>
@@ -142,26 +158,36 @@ export default function ContentCard({
 
         {isArchived ? <p className="mt-1 text-xs text-warning">Archived (only visible to you)</p> : null}
 
-        <div className="mt-3 flex items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={onLike} className={liked ? "text-destructive" : ""}>
-            <Heart className="mr-1 h-4 w-4" /> {likes}
-          </Button>
-          <Button variant="ghost" size="sm" onClick={toggleComments}>
-            <MessageCircle className="mr-1 h-4 w-4" /> {comments}
-          </Button>
-          <Button variant="ghost" size="sm" onClick={onShare}>
-            <Share2 className="mr-1 h-4 w-4" /> Share
-          </Button>
-          {onSaveToggle ? (
-            <Button variant="ghost" size="sm" onClick={onSaveToggle} className={isSaved ? "text-primary" : ""}>
-              <Bookmark className="mr-1 h-4 w-4" /> {isSaved ? "Saved" : "Save"}
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={onLike} className={liked ? "text-destructive" : ""}>
+              <Heart className="mr-1 h-4 w-4" /> {likes}
             </Button>
-          ) : null}
-          {onReport ? (
-            <Button variant="ghost" size="sm" onClick={onReport}>
-              <ShieldAlert className="mr-1 h-4 w-4" /> Report
+            <Button variant="ghost" size="sm" onClick={toggleComments}>
+              <MessageCircle className="mr-1 h-4 w-4" /> {comments}
             </Button>
-          ) : null}
+            <Button variant="ghost" size="sm" onClick={onShare}>
+              <Share2 className="mr-1 h-4 w-4" /> Share
+            </Button>
+          </div>
+
+          <div className="flex items-center gap-1 pr-1">
+            {onSaveToggle ? (
+              <Button variant="ghost" size="sm" onClick={onSaveToggle} className={isSaved ? "text-primary" : ""}>
+                <Bookmark className="mr-1 h-4 w-4" /> {isSaved ? "Saved" : "Save"}
+              </Button>
+            ) : null}
+            {onReport ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onReport}
+                className="border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              >
+                <ShieldAlert className="mr-1 h-4 w-4" /> Report
+              </Button>
+            ) : null}
+          </div>
         </div>
 
         {onReact ? (

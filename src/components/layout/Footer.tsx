@@ -11,7 +11,7 @@ export default function Footer() {
             CampusCanvas
           </Link>
           <p className="text-sm text-muted-foreground">
-            © 2026 CampusCanvas. Built for students, by students.
+            © 2026 CampusCanvas. Built by EUGIN JOY.
           </p>
         </div>
       </div>
