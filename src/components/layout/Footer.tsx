@@ -8,10 +8,10 @@ export default function Footer() {
         <div className="flex flex-col items-center justify-between gap-4 md:flex-row">
           <Link to="/" className="flex items-center gap-2 font-display text-lg font-bold text-foreground">
             <GraduationCap className="h-5 w-5 text-primary" />
-            CampusHub
+            CampusCanvas
           </Link>
           <p className="text-sm text-muted-foreground">
-            © 2026 CampusHub. Built for students, by students.
+            © 2026 CampusCanvas. Built for students, by students.
           </p>
         </div>
       </div>

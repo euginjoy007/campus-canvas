@@ -15,6 +15,7 @@ import Chat from "./pages/Chat";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import NotFound from "./pages/NotFound";
+import ProtectedRoute from "@/components/ProtectedRoute";
 
 const queryClient = new QueryClient();
 
@@ -30,11 +31,11 @@ const App = () => (
             <main className="flex-1">
               <Routes>
                 <Route path="/" element={<Index />} />
-                <Route path="/photography" element={<Photography />} />
-                <Route path="/films" element={<Films />} />
-                <Route path="/art-music" element={<ArtMusic />} />
-                <Route path="/lost-found" element={<LostFound />} />
-                <Route path="/chat" element={<Chat />} />
+                <Route path="/photography" element={<ProtectedRoute><Photography /></ProtectedRoute>} />
+                <Route path="/films" element={<ProtectedRoute><Films /></ProtectedRoute>} />
+                <Route path="/art-music" element={<ProtectedRoute><ArtMusic /></ProtectedRoute>} />
+                <Route path="/lost-found" element={<ProtectedRoute><LostFound /></ProtectedRoute>} />
+                <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
                 <Route path="/login" element={<Login />} />
                 <Route path="/register" element={<Register />} />
                 <Route path="*" element={<NotFound />} />

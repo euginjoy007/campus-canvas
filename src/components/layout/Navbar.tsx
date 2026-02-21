@@ -23,7 +23,7 @@ export default function Navbar() {
       <div className="container flex h-16 items-center justify-between">
         <Link to="/" className="flex items-center gap-2 font-display text-xl font-bold text-foreground">
           <GraduationCap className="h-7 w-7 text-primary" />
-          <span>Campus<span className="text-gradient">Hub</span></span>
+          <span>Campus<span className="text-gradient">Canvas</span></span>
         </Link>
 
         <nav className="hidden items-center gap-1 md:flex">

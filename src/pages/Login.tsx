@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { GraduationCap, Mail, Lock, Eye, EyeOff } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -16,6 +16,8 @@ export default function Login() {
   const { signIn } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
+  const from = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname || "/";
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,7 +25,7 @@ export default function Login() {
     try {
       await signIn(email, password);
       toast({ title: "Welcome back!", description: "You've signed in successfully." });
-      navigate("/");
+      navigate(from, { replace: true });
     } catch (error: any) {
       toast({ title: "Sign in failed", description: error.message, variant: "destructive" });
     } finally {
@@ -38,7 +40,7 @@ export default function Login() {
           <div className="mb-6 text-center">
             <GraduationCap className="mx-auto h-10 w-10 text-primary" />
             <h1 className="mt-3 font-display text-2xl font-bold text-foreground">Welcome back</h1>
-            <p className="mt-1 text-sm text-muted-foreground">Sign in to your CampusHub account</p>
+            <p className="mt-1 text-sm text-muted-foreground">Sign in to your CampusCanvas account</p>
           </div>
 
           <form className="space-y-4" onSubmit={handleSubmit}>

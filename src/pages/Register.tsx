@@ -42,7 +42,7 @@ export default function Register() {
         <div className="rounded-2xl border border-border bg-card p-8 shadow-card">
           <div className="mb-6 text-center">
             <GraduationCap className="mx-auto h-10 w-10 text-primary" />
-            <h1 className="mt-3 font-display text-2xl font-bold text-foreground">Join CampusHub</h1>
+            <h1 className="mt-3 font-display text-2xl font-bold text-foreground">Join CampusCanvas</h1>
             <p className="mt-1 text-sm text-muted-foreground">Create your account with your college email</p>
           </div>
 

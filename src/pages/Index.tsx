@@ -1,8 +1,13 @@
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
-import { Camera, Film, Palette, Search, MessageCircle, ArrowRight, Users, Star } from "lucide-react";
+import { Camera, Film, Palette, Search, MessageCircle, ArrowRight, Users, Star, Bell, Trophy, Sparkles } from "lucide-react";
 import heroBg from "@/assets/hero-bg.jpg";
+import { supabase } from "@/integrations/supabase/client";
+
+type LeaderboardRow = { department: string; likes: number };
+type EventItem = { id: string; title: string; when: string; place: string };
 
 const features = [
   { icon: Camera, title: "Photography", desc: "Share your best shots with the campus community", to: "/photography", color: "bg-primary/10 text-primary" },
@@ -19,10 +24,60 @@ const stats = [
   { value: "100%", label: "Student-Driven" },
 ];
 
+const stories = [
+  { title: "Hackathon Finals", dept: "Engineering" },
+  { title: "Open Mic Night", dept: "Fine Arts" },
+  { title: "Photo Walk", dept: "Design" },
+  { title: "Startup Pitch", dept: "Business" },
+];
+
+const events: EventItem[] = [
+  { id: "e1", title: "Tech Talk: AI in Campus Life", when: "Fri 4:00 PM", place: "Auditorium" },
+  { id: "e2", title: "Music Club Jam", when: "Sat 6:30 PM", place: "Open Stage" },
+  { id: "e3", title: "Design Portfolio Review", when: "Mon 2:00 PM", place: "Studio 2" },
+];
+
 export default function Index() {
+  const [leaderboard, setLeaderboard] = useState<LeaderboardRow[]>([]);
+  const [rsvpIds, setRsvpIds] = useState<Set<string>>(() => new Set(JSON.parse(localStorage.getItem("event-rsvp") ?? "[]")));
+
+  useEffect(() => {
+    const loadLeaderboard = async () => {
+      const { data } = await supabase.from("photos").select("department, likes_count").limit(400);
+      if (!data) return;
+      const map = new Map<string, number>();
+      data.forEach((row) => {
+        const dept = row.department ?? "General";
+        map.set(dept, (map.get(dept) ?? 0) + (row.likes_count ?? 0));
+      });
+      setLeaderboard(
+        [...map.entries()]
+          .map(([department, likes]) => ({ department, likes }))
+          .sort((a, b) => b.likes - a.likes)
+          .slice(0, 5),
+      );
+    };
+
+    loadLeaderboard();
+  }, []);
+
+  const challengeProgress = useMemo(() => {
+    const savedCount = JSON.parse(localStorage.getItem("saved-photos") ?? "[]").length;
+    return Math.min(100, savedCount * 10);
+  }, []);
+
+  const toggleRsvp = (eventId: string) => {
+    setRsvpIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(eventId)) next.delete(eventId);
+      else next.add(eventId);
+      localStorage.setItem("event-rsvp", JSON.stringify([...next]));
+      return next;
+    });
+  };
+
   return (
     <div>
-      {/* Hero */}
       <section className="relative overflow-hidden gradient-hero py-20 md:py-32">
         <div className="absolute inset-0 opacity-20">
           <img src={heroBg} alt="" className="h-full w-full object-cover" />
@@ -62,7 +117,22 @@ export default function Index() {
         </div>
       </section>
 
-      {/* Stats */}
+      <section className="border-b border-border bg-card py-6">
+        <div className="container">
+          <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            <Sparkles className="h-4 w-4" /> Stories & Spotlights
+          </h3>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {stories.map((story) => (
+              <div key={story.title} className="rounded-lg border border-border bg-background p-3">
+                <p className="font-medium text-foreground">{story.title}</p>
+                <p className="text-xs text-muted-foreground">{story.dept}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
       <section className="border-b border-border bg-card py-12">
         <div className="container">
           <div className="grid grid-cols-2 gap-6 md:grid-cols-4">
@@ -82,7 +152,56 @@ export default function Index() {
         </div>
       </section>
 
-      {/* Features */}
+      <section className="py-10">
+        <div className="container grid gap-6 lg:grid-cols-3">
+          <div className="rounded-xl border border-border bg-card p-5">
+            <h3 className="mb-3 flex items-center gap-2 font-display text-lg font-semibold text-foreground">
+              <Trophy className="h-5 w-5 text-warning" /> Department Leaderboard
+            </h3>
+            {leaderboard.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No leaderboard data yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {leaderboard.map((row, idx) => (
+                  <div key={row.department} className="flex items-center justify-between rounded-md bg-muted/40 px-3 py-2 text-sm">
+                    <span>{idx + 1}. {row.department}</span>
+                    <span className="font-semibold">{row.likes} likes</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-border bg-card p-5">
+            <h3 className="mb-2 flex items-center gap-2 font-display text-lg font-semibold text-foreground">
+              <Star className="h-5 w-5 text-primary" /> Weekly Challenge
+            </h3>
+            <p className="text-sm text-muted-foreground">Theme: Campus Moments. Upload and save posts to increase your badge progress.</p>
+            <div className="mt-4 h-3 overflow-hidden rounded-full bg-muted">
+              <div className="h-full bg-primary transition-all" style={{ width: `${challengeProgress}%` }} />
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">Progress: {challengeProgress}%</p>
+          </div>
+
+          <div className="rounded-xl border border-border bg-card p-5">
+            <h3 className="mb-3 flex items-center gap-2 font-display text-lg font-semibold text-foreground">
+              <Bell className="h-5 w-5 text-accent" /> Event RSVP & Reminder
+            </h3>
+            <div className="space-y-2">
+              {events.map((event) => (
+                <div key={event.id} className="rounded-md bg-muted/40 p-3">
+                  <p className="font-medium text-foreground">{event.title}</p>
+                  <p className="text-xs text-muted-foreground">{event.when} · {event.place}</p>
+                  <Button type="button" variant={rsvpIds.has(event.id) ? "default" : "outline"} size="sm" className="mt-2" onClick={() => toggleRsvp(event.id)}>
+                    {rsvpIds.has(event.id) ? "RSVP'd (Reminder ON)" : "RSVP"}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section className="py-16 md:py-24">
         <div className="container">
           <motion.div
@@ -124,7 +243,6 @@ export default function Index() {
         </div>
       </section>
 
-      {/* CTA */}
       <section className="gradient-hero py-16">
         <div className="container text-center">
           <motion.div
