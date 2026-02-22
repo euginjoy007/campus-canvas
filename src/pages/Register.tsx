@@ -20,7 +20,8 @@ export default function Register() {
   const [department, setDepartment] = useState("");
   const [year, setYear] = useState("");
   const [loading, setLoading] = useState(false);
-  const { signUp } = useAuth();
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const { signUp, signInWithGoogle } = useAuth();
   const { toast } = useToast();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -36,6 +37,16 @@ export default function Register() {
     }
   };
 
+  const handleGoogleSignUp = async () => {
+    setGoogleLoading(true);
+    try {
+      await signInWithGoogle();
+    } catch (error: any) {
+      toast({ title: "Google sign up failed", description: error.message, variant: "destructive" });
+      setGoogleLoading(false);
+    }
+  };
+
   return (
     <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center px-4 py-12">
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-md">
@@ -44,6 +55,16 @@ export default function Register() {
             <GraduationCap className="mx-auto h-10 w-10 text-primary" />
             <h1 className="mt-3 font-display text-2xl font-bold text-foreground">Join CampusCanvas</h1>
             <p className="mt-1 text-sm text-muted-foreground">Create your account with your college email</p>
+          </div>
+
+          <Button type="button" variant="outline" className="w-full" onClick={handleGoogleSignUp} disabled={googleLoading || loading}>
+            Continue with Google
+          </Button>
+
+          <div className="my-4 flex items-center gap-3 text-xs text-muted-foreground">
+            <span className="h-px flex-1 bg-border" />
+            <span>or continue with email</span>
+            <span className="h-px flex-1 bg-border" />
           </div>
 
           <form className="space-y-4" onSubmit={handleSubmit}>
@@ -95,7 +116,7 @@ export default function Register() {
               </div>
             </div>
 
-            <Button className="w-full" size="lg" disabled={loading}>
+            <Button className="w-full" size="lg" disabled={loading || googleLoading}>
               {loading ? "Creating account..." : "Create Account"}
             </Button>
           </form>

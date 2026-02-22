@@ -13,7 +13,8 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const { signIn } = useAuth();
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const { signIn, signInWithGoogle } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
   const location = useLocation();
@@ -33,6 +34,16 @@ export default function Login() {
     }
   };
 
+  const handleGoogleSignIn = async () => {
+    setGoogleLoading(true);
+    try {
+      await signInWithGoogle();
+    } catch (error: any) {
+      toast({ title: "Google sign in failed", description: error.message, variant: "destructive" });
+      setGoogleLoading(false);
+    }
+  };
+
   return (
     <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center px-4 py-12">
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-md">
@@ -41,6 +52,16 @@ export default function Login() {
             <GraduationCap className="mx-auto h-10 w-10 text-primary" />
             <h1 className="mt-3 font-display text-2xl font-bold text-foreground">Welcome back</h1>
             <p className="mt-1 text-sm text-muted-foreground">Sign in to your CampusCanvas account</p>
+          </div>
+
+          <Button type="button" variant="outline" className="w-full" onClick={handleGoogleSignIn} disabled={googleLoading || loading}>
+            Continue with Google
+          </Button>
+
+          <div className="my-4 flex items-center gap-3 text-xs text-muted-foreground">
+            <span className="h-px flex-1 bg-border" />
+            <span>or continue with email</span>
+            <span className="h-px flex-1 bg-border" />
           </div>
 
           <form className="space-y-4" onSubmit={handleSubmit}>
@@ -63,7 +84,7 @@ export default function Login() {
               </div>
             </div>
 
-            <Button className="w-full" size="lg" disabled={loading}>
+            <Button className="w-full" size="lg" disabled={loading || googleLoading}>
               {loading ? "Signing in..." : "Sign In"}
             </Button>
           </form>
