@@ -24,6 +24,7 @@ type Photo = {
 };
 
 type PhotoComment = { id: string; text: string; author: string };
+type ReactionLedger = Record<string, Record<string, string>>;
 
 const filters = ["All", "Saved", "Computer Science", "Fine Arts", "Engineering", "Business", "Sciences"];
 
@@ -39,10 +40,50 @@ export default function Photography() {
   const [commentsMap, setCommentsMap] = useState<Record<string, PhotoComment[]>>({});
   const [commentLoadingMap, setCommentLoadingMap] = useState<Record<string, boolean>>({});
   const [savedPhotoIds, setSavedPhotoIds] = useState<Set<string>>(() => new Set(JSON.parse(localStorage.getItem("saved-photos") ?? "[]")));
-  const [reactionMap, setReactionMap] = useState<Record<string, Record<string, number>>>(() => JSON.parse(localStorage.getItem("photo-reactions") ?? "{}"));
+  const [reactionLedger, setReactionLedger] = useState<ReactionLedger>(() => JSON.parse(localStorage.getItem("photo-reaction-ledger") ?? "{}"));
+  const [reactionMap, setReactionMap] = useState<Record<string, Record<string, number>>>({});
   const fileRef = useRef<HTMLInputElement>(null);
   const { user } = useAuth();
   const { toast } = useToast();
+
+  const computeReactionCounts = (ledger: ReactionLedger) =>
+    Object.fromEntries(
+      Object.entries(ledger).map(([photoId, reactionsByUser]) => {
+        const counts: Record<string, number> = {};
+        Object.values(reactionsByUser).forEach((emoji) => {
+          counts[emoji] = (counts[emoji] ?? 0) + 1;
+        });
+        return [photoId, counts];
+      }),
+    );
+
+  const refreshPhotoStats = async (photoId: string) => {
+    const [{ data: likes }, { data: comments }] = await Promise.all([
+      supabase.from("photo_likes").select("photo_id, user_id").eq("photo_id", photoId),
+      supabase.from("comments").select("id").eq("content_type", "photo").eq("content_id", photoId),
+    ]);
+
+    const uniqueLikeUsers = new Set((likes ?? []).map((row) => row.user_id));
+    const likesCount = uniqueLikeUsers.size;
+    const commentsCount = comments?.length ?? 0;
+
+    setPhotos((prev) =>
+      prev.map((photo) =>
+        photo.id === photoId
+          ? { ...photo, likes_count: likesCount, comments_count: commentsCount }
+          : photo,
+      ),
+    );
+
+    if (user) {
+      setLikedPhotoIds((prev) => {
+        const next = new Set(prev);
+        if (uniqueLikeUsers.has(user.id)) next.add(photoId);
+        else next.delete(photoId);
+        return next;
+      });
+    }
+  };
 
   const loadPhotos = async () => {
     const { data } = await supabase
@@ -50,26 +91,67 @@ export default function Photography() {
       .select("id, user_id, image_url, title, department, likes_count, comments_count, is_approved")
       .order("created_at", { ascending: false });
 
-    if (data) {
-      const userIds = [...new Set(data.map((p) => p.user_id))];
-      const { data: profiles } = await supabase.from("profiles").select("user_id, full_name").in("user_id", userIds);
-      const nameMap = new Map((profiles ?? []).map((p) => [p.user_id, p.full_name]));
+    if (!data) {
+      setLoading(false);
+      return;
+    }
 
-      setPhotos(data.map((photo) => {
+    const userIds = [...new Set(data.map((p) => p.user_id))];
+    const ids = data.map((p) => p.id);
+
+    const [{ data: profiles }, { data: likes }, { data: comments }] = await Promise.all([
+      supabase.from("profiles").select("user_id, full_name").in("user_id", userIds),
+      ids.length > 0 ? supabase.from("photo_likes").select("photo_id, user_id").in("photo_id", ids) : Promise.resolve({ data: [] }),
+      ids.length > 0
+        ? supabase.from("comments").select("content_id").eq("content_type", "photo").in("content_id", ids)
+        : Promise.resolve({ data: [] }),
+    ]);
+
+    const nameMap = new Map((profiles ?? []).map((p) => [p.user_id, p.full_name]));
+
+    const likeUsersByPhoto = new Map<string, Set<string>>();
+    (likes ?? []).forEach((row) => {
+      const users = likeUsersByPhoto.get(row.photo_id) ?? new Set<string>();
+      users.add(row.user_id);
+      likeUsersByPhoto.set(row.photo_id, users);
+    });
+
+    const commentCountMap = new Map<string, number>();
+    (comments ?? []).forEach((row) => {
+      commentCountMap.set(row.content_id, (commentCountMap.get(row.content_id) ?? 0) + 1);
+    });
+
+    setPhotos(
+      data.map((photo) => {
         const name = nameMap.get(photo.user_id) ?? "Campus user";
         const lower = name.toLowerCase();
         const verified_tag = lower.includes("club") || lower.includes("admin") ? "Verified" : null;
-        return { ...photo, author_name: name, verified_tag };
-      }));
-    }
-    setLoading(false);
 
-    if (user && data && data.length > 0) {
-      const ids = data.map((p) => p.id);
-      const { data: likes } = await supabase.from("photo_likes").select("photo_id").in("photo_id", ids).eq("user_id", user.id);
-      if (likes) setLikedPhotoIds(new Set(likes.map((l) => l.photo_id)));
+        return {
+          ...photo,
+          likes_count: likeUsersByPhoto.get(photo.id)?.size ?? 0,
+          comments_count: commentCountMap.get(photo.id) ?? 0,
+          author_name: name,
+          verified_tag,
+        };
+      }),
+    );
+
+    if (user) {
+      const likedIds = new Set(
+        [...likeUsersByPhoto.entries()].filter(([, users]) => users.has(user.id)).map(([photoId]) => photoId),
+      );
+      setLikedPhotoIds(likedIds);
+    } else {
+      setLikedPhotoIds(new Set());
     }
+
+    setLoading(false);
   };
+
+  useEffect(() => {
+    setReactionMap(computeReactionCounts(reactionLedger));
+  }, [reactionLedger]);
 
   useEffect(() => {
     loadPhotos();
@@ -93,11 +175,13 @@ export default function Photography() {
         [photoId]: data.map((c) => ({ id: c.id, text: c.text, author: nameMap.get(c.user_id) ?? "Student" })),
       }));
     }
+
     setCommentLoadingMap((prev) => ({ ...prev, [photoId]: false }));
   };
 
   const addComment = async (photoId: string, text: string) => {
     if (!user) return;
+
     const { error } = await supabase.from("comments").insert({
       user_id: user.id,
       content_type: "photo",
@@ -110,44 +194,35 @@ export default function Photography() {
       return;
     }
 
-    const photo = photos.find((p) => p.id === photoId);
-    if (photo) {
-      const nextCount = photo.comments_count + 1;
-      setPhotos((prev) => prev.map((p) => (p.id === photoId ? { ...p, comments_count: nextCount } : p)));
-      await supabase.from("photos").update({ comments_count: nextCount }).eq("id", photoId);
-    }
-
-    await loadComments(photoId);
+    await Promise.all([loadComments(photoId), refreshPhotoStats(photoId)]);
   };
 
   const toggleLike = async (photoId: string) => {
     if (!user) return;
     const alreadyLiked = likedPhotoIds.has(photoId);
-    const photo = photos.find((p) => p.id === photoId);
-    if (!photo) return;
 
     if (alreadyLiked) {
       await supabase.from("photo_likes").delete().eq("photo_id", photoId).eq("user_id", user.id);
-      const next = Math.max(0, photo.likes_count - 1);
-      await supabase.from("photos").update({ likes_count: next }).eq("id", photoId);
-      setLikedPhotoIds((prev) => {
-        const n = new Set(prev);
-        n.delete(photoId);
-        return n;
-      });
-      setPhotos((prev) => prev.map((p) => (p.id === photoId ? { ...p, likes_count: next } : p)));
+      await refreshPhotoStats(photoId);
       return;
     }
 
-    const { error } = await supabase.from("photo_likes").insert({ photo_id: photoId, user_id: user.id });
-    if (error) {
-      toast({ title: "Like failed", description: error.message, variant: "destructive" });
-      return;
+    const { data: existingLike } = await supabase
+      .from("photo_likes")
+      .select("id")
+      .eq("photo_id", photoId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (!existingLike) {
+      const { error } = await supabase.from("photo_likes").insert({ photo_id: photoId, user_id: user.id });
+      if (error) {
+        toast({ title: "Like failed", description: error.message, variant: "destructive" });
+        return;
+      }
     }
-    const next = photo.likes_count + 1;
-    await supabase.from("photos").update({ likes_count: next }).eq("id", photoId);
-    setLikedPhotoIds((prev) => new Set(prev).add(photoId));
-    setPhotos((prev) => prev.map((p) => (p.id === photoId ? { ...p, likes_count: next } : p)));
+
+    await refreshPhotoStats(photoId);
   };
 
   const sharePost = async (photoId: string, postTitle: string) => {
@@ -171,15 +246,25 @@ export default function Photography() {
   };
 
   const reactToPost = (photoId: string, emoji: string) => {
-    setReactionMap((prev) => {
-      const next = {
-        ...prev,
-        [photoId]: {
-          ...(prev[photoId] ?? {}),
-          [emoji]: (prev[photoId]?.[emoji] ?? 0) + 1,
-        },
-      };
-      localStorage.setItem("photo-reactions", JSON.stringify(next));
+    if (!user) {
+      toast({ title: "Sign in required", description: "Please sign in to react to posts." });
+      return;
+    }
+
+    setReactionLedger((prev) => {
+      const perPhoto = { ...(prev[photoId] ?? {}) };
+
+      if (perPhoto[user.id] === emoji) {
+        delete perPhoto[user.id];
+      } else {
+        perPhoto[user.id] = emoji;
+      }
+
+      const next: ReactionLedger = { ...prev, [photoId]: perPhoto };
+      if (Object.keys(perPhoto).length === 0) delete next[photoId];
+
+      localStorage.setItem("photo-reaction-ledger", JSON.stringify(next));
+      setReactionMap(computeReactionCounts(next));
       return next;
     });
   };
@@ -224,6 +309,19 @@ export default function Photography() {
     }
 
     setPhotos((prev) => prev.filter((p) => p.id !== photoId));
+    setLikedPhotoIds((prev) => {
+      const next = new Set(prev);
+      next.delete(photoId);
+      return next;
+    });
+    setReactionLedger((prev) => {
+      if (!prev[photoId]) return prev;
+      const next = { ...prev };
+      delete next[photoId];
+      localStorage.setItem("photo-reaction-ledger", JSON.stringify(next));
+      setReactionMap(computeReactionCounts(next));
+      return next;
+    });
     toast({ title: "Post deleted", description: "Your photo has been removed." });
   };
 

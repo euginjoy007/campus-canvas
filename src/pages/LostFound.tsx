@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import SectionHeader from "@/components/shared/SectionHeader";
 import { Button } from "@/components/ui/button";
-import { Plus, MapPin, Calendar, CheckCircle, MessageCircle } from "lucide-react";
+import { Plus, MapPin, Calendar, CheckCircle, MessageCircle, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -13,19 +13,28 @@ import { Link } from "react-router-dom";
 
 type LostFoundItem = {
   id: string;
+  user_id: string;
   title: string;
   status: string;
   location: string | null;
   created_at: string;
   description: string;
   image_url: string | null;
+  contact_info: string | null;
+};
+
+type ProfileInfo = {
+  full_name: string;
+  email: string;
 };
 
 export default function LostFound() {
   const [filter, setFilter] = useState<"all" | "lost" | "found">("all");
   const [items, setItems] = useState<LostFoundItem[]>([]);
+  const [profileMap, setProfileMap] = useState<Record<string, ProfileInfo>>({});
   const [loading, setLoading] = useState(true);
   const [posting, setPosting] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [location, setLocation] = useState("");
@@ -39,10 +48,31 @@ export default function LostFound() {
   const loadItems = async () => {
     const { data } = await supabase
       .from("lost_found")
-      .select("id, title, status, location, created_at, description, image_url")
+      .select("id, user_id, title, status, location, created_at, description, image_url, contact_info")
       .order("created_at", { ascending: false });
 
-    if (data) setItems(data);
+    if (data) {
+      setItems(data);
+
+      const userIds = [...new Set(data.map((item) => item.user_id))];
+      if (userIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from("profiles")
+          .select("user_id, full_name, email")
+          .in("user_id", userIds);
+
+        if (profiles) {
+          const nextMap: Record<string, ProfileInfo> = {};
+          profiles.forEach((profile) => {
+            nextMap[profile.user_id] = {
+              full_name: profile.full_name || "Unknown user",
+              email: profile.email || "",
+            };
+          });
+          setProfileMap(nextMap);
+        }
+      }
+    }
     setLoading(false);
   };
 
@@ -102,6 +132,21 @@ export default function LostFound() {
     if (imageRef.current) imageRef.current.value = "";
     await loadItems();
     setPosting(false);
+  };
+
+  const handleDelete = async (itemId: string) => {
+    if (!user) return;
+    setDeletingId(itemId);
+    const { error } = await supabase.from("lost_found").delete().eq("id", itemId).eq("user_id", user.id);
+    if (error) {
+      toast({ title: "Delete failed", description: error.message, variant: "destructive" });
+      setDeletingId(null);
+      return;
+    }
+
+    toast({ title: "Post deleted", description: "Your lost/found post has been removed." });
+    await loadItems();
+    setDeletingId(null);
   };
 
   const filtered = useMemo(() => {
@@ -170,6 +215,12 @@ export default function LostFound() {
         <div className="mt-8 grid gap-6 sm:grid-cols-2">
           {filtered.map((item, i) => {
             const resolved = item.status === "resolved";
+            const ownerProfile = profileMap[item.user_id];
+            const ownerName = ownerProfile?.full_name || "Unknown user";
+            const contact = item.contact_info || ownerProfile?.email || "";
+            const contactHref = contact.includes("@") ? `mailto:${contact}` : `tel:${contact.replace(/\s+/g, "")}`;
+            const isOwner = user?.id === item.user_id;
+
             return (
               <motion.div
                 key={item.id}
@@ -189,21 +240,40 @@ export default function LostFound() {
                         {item.status}
                       </Badge>
                     </div>
+                    <p className="mt-1 text-sm text-muted-foreground">Posted by {ownerName}</p>
                     <p className="mt-2 text-sm text-muted-foreground">{item.description}</p>
                     <div className="mt-3 flex flex-wrap gap-3 text-xs text-muted-foreground">
                       <span className="flex items-center gap-1"><MapPin className="h-3 w-3" /> {item.location ?? "Unknown location"}</span>
                       <span className="flex items-center gap-1"><Calendar className="h-3 w-3" /> {new Date(item.created_at).toLocaleDateString()}</span>
                     </div>
-                    <div className="mt-4 flex items-center justify-between">
+                    <div className="mt-4 flex flex-wrap items-center gap-2">
                       {resolved ? (
                         <span className="flex items-center gap-1 text-sm font-medium text-success">
                           <CheckCircle className="h-4 w-4" /> Resolved
                         </span>
+                      ) : contact ? (
+                        <Button size="sm" variant="outline" asChild>
+                          <a href={contactHref}>
+                            <MessageCircle className="mr-1 h-3 w-3" /> Contact: {contact}
+                          </a>
+                        </Button>
                       ) : (
                         <Button size="sm" variant="outline" disabled>
-                          <MessageCircle className="mr-1 h-3 w-3" /> Contact via profile soon
+                          <MessageCircle className="mr-1 h-3 w-3" /> Contact unavailable
                         </Button>
                       )}
+
+                      {isOwner ? (
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          type="button"
+                          onClick={() => handleDelete(item.id)}
+                          disabled={deletingId === item.id}
+                        >
+                          <Trash2 className="mr-1 h-3 w-3" /> {deletingId === item.id ? "Deleting..." : "Delete"}
+                        </Button>
+                      ) : null}
                     </div>
                   </div>
                 </div>
