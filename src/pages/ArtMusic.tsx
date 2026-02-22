@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import SectionHeader from "@/components/shared/SectionHeader";
 import ContentCard from "@/components/shared/ContentCard";
 import { Button } from "@/components/ui/button";
-import { Upload, Play, Pause, Music, Share2, MessageCircle, Heart } from "lucide-react";
+import { Upload, Play, Pause, Music, Share2, MessageCircle, Heart, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -19,6 +19,7 @@ type ArtMusicItem = {
   thumbnail_url: string | null;
   likes_count: number;
   department: string | null;
+  user_id: string;
 };
 
 type ItemComment = { id: string; text: string; author: string };
@@ -63,8 +64,7 @@ export default function ArtMusic() {
 
   const inferUploadContentType = (file: File, type: "art" | "music") => {
     if (file.type) return file.type;
-    const ext = (file.name.split(".").pop() ?? "").toLowerCase();
-
+    const ext = (file.name.split('.').pop() ?? '').toLowerCase();
     if (type === "music") {
       const map: Record<string, string> = {
         mp3: "audio/mpeg",
@@ -76,7 +76,6 @@ export default function ArtMusic() {
       };
       return map[ext] ?? "audio/mpeg";
     }
-
     const imageMap: Record<string, string> = {
       jpg: "image/jpeg",
       jpeg: "image/jpeg",
@@ -88,10 +87,11 @@ export default function ArtMusic() {
     return imageMap[ext] ?? "application/octet-stream";
   };
 
+
   const loadItems = async () => {
     const { data } = await supabase
       .from("art_music")
-      .select("id, title, media_type, media_url, thumbnail_url, likes_count, department")
+      .select("id, title, media_type, media_url, thumbnail_url, likes_count, department, user_id")
       .order("created_at", { ascending: false });
 
     if (data) setItems(data);
@@ -110,32 +110,18 @@ export default function ArtMusic() {
       .eq("content_type", "art")
       .eq("content_id", id)
       .order("created_at", { ascending: true });
-
     if (data) {
       const userIds = [...new Set(data.map((c) => c.user_id))];
       const { data: profiles } = await supabase.from("profiles").select("user_id, full_name").in("user_id", userIds);
       const nameMap = new Map((profiles ?? []).map((p) => [p.user_id, p.full_name]));
-      setCommentsMap((prev) => ({
-        ...prev,
-        [id]: data.map((c) => ({
-          id: c.id,
-          text: c.text,
-          author: nameMap.get(c.user_id) ?? "Student",
-        })),
-      }));
+      setCommentsMap((prev) => ({ ...prev, [id]: data.map((c) => ({ id: c.id, text: c.text, author: nameMap.get(c.user_id) ?? "Student" })) }));
     }
-
     setCommentLoadingMap((prev) => ({ ...prev, [id]: false }));
   };
 
   const addComment = async (id: string, text: string) => {
     if (!user) return;
-    const { error } = await supabase.from("comments").insert({
-      user_id: user.id,
-      content_type: "art",
-      content_id: id,
-      text,
-    });
+    const { error } = await supabase.from("comments").insert({ user_id: user.id, content_type: "art", content_id: id, text });
     if (error) {
       toast({ title: "Comment failed", description: error.message, variant: "destructive" });
       return;
@@ -146,31 +132,64 @@ export default function ArtMusic() {
   const toggleLike = async (id: string) => {
     const item = items.find((i) => i.id === id);
     if (!item) return;
-
     const isLiked = likedIds.has(id);
     const nextCount = Math.max(0, item.likes_count + (isLiked ? -1 : 1));
-
     const { error } = await supabase.from("art_music").update({ likes_count: nextCount }).eq("id", id);
     if (error) {
       toast({ title: "Like failed", description: error.message, variant: "destructive" });
       return;
     }
-
     setItems((prev) => prev.map((i) => (i.id === id ? { ...i, likes_count: nextCount } : i)));
     const next = new Set(likedIds);
-    if (isLiked) next.delete(id);
-    else next.add(id);
+    if (isLiked) next.delete(id); else next.add(id);
     persistLiked(next);
   };
+
+  const deleteItem = async (itemId: string) => {
+    const target = items.find((item) => item.id === itemId);
+    if (!target || !user || target.user_id !== user.id) return;
+
+    await supabase.from("comments").delete().eq("content_type", "art").eq("content_id", itemId);
+
+    const { error } = await supabase.from("art_music").delete().eq("id", itemId).eq("user_id", user.id);
+    if (error) {
+      toast({ title: "Delete failed", description: error.message, variant: "destructive" });
+      return;
+    }
+
+    const mediaPath = target.media_url.split("/object/public/art-music/")[1];
+    const thumbPath = target.thumbnail_url?.split("/object/public/art-music/")[1] ?? null;
+    const paths = [mediaPath, thumbPath].filter((path): path is string => Boolean(path));
+    if (paths.length > 0) {
+      await supabase.storage.from("art-music").remove(paths);
+    }
+
+    setItems((prev) => prev.filter((item) => item.id !== itemId));
+    setLikedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(itemId);
+      localStorage.setItem("art-liked", JSON.stringify([...next]));
+      return next;
+    });
+    setCommentsMap((prev) => {
+      const next = { ...prev };
+      delete next[itemId];
+      return next;
+    });
+    if (playingTrackId === itemId) {
+      setPlayingTrackId(null);
+    }
+    delete audioRefs.current[itemId];
+
+    toast({ title: "Post deleted", description: "Your post has been removed." });
+  };
+
+
 
   const toggleTrackPlayback = async (trackId: string) => {
     const targetAudio = audioRefs.current[trackId];
     if (!targetAudio) {
-      toast({
-        title: "Audio unavailable",
-        description: "This track cannot be played right now.",
-        variant: "destructive",
-      });
+      toast({ title: "Audio unavailable", description: "This track cannot be played right now.", variant: "destructive" });
       return;
     }
 
@@ -194,11 +213,7 @@ export default function ArtMusic() {
       await targetAudio.play();
       setPlayingTrackId(trackId);
     } catch {
-      toast({
-        title: "Playback failed",
-        description: "Browser blocked autoplay. Click play again.",
-        variant: "destructive",
-      });
+      toast({ title: "Playback failed", description: "Browser blocked autoplay. Click play again.", variant: "destructive" });
       setPlayingTrackId(null);
     }
   };
@@ -217,11 +232,7 @@ export default function ArtMusic() {
     e.preventDefault();
     if (!user) return;
     if (!title.trim() || !mediaFile) {
-      toast({
-        title: "Missing details",
-        description: "Please add title and media file.",
-        variant: "destructive",
-      });
+      toast({ title: "Missing details", description: "Please add title and media file.", variant: "destructive" });
       return;
     }
 
@@ -249,13 +260,11 @@ export default function ArtMusic() {
         upsert: false,
         contentType: thumbFile.type || "image/jpeg",
       });
-
       if (thumbUpload.error) {
         toast({ title: "Thumbnail failed", description: thumbUpload.error.message, variant: "destructive" });
         setUploading(false);
         return;
       }
-
       thumbnail_url = supabase.storage.from("art-music").getPublicUrl(thumbPath).data.publicUrl;
     }
 
@@ -303,11 +312,7 @@ export default function ArtMusic() {
 
       {!user ? (
         <p className="mt-2 text-sm text-muted-foreground">
-          Please{" "}
-          <Link to="/login" className="text-primary underline">
-            sign in
-          </Link>{" "}
-          to upload art/music.
+          Please <Link to="/login" className="text-primary underline">sign in</Link> to upload art/music.
         </p>
       ) : (
         <form onSubmit={handleUpload} className="mt-4 grid gap-3 rounded-xl border border-border bg-card p-4 md:grid-cols-4">
@@ -315,40 +320,25 @@ export default function ArtMusic() {
             <Label>Title</Label>
             <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Work title" required />
           </div>
-
           <div className="space-y-1">
             <Label>Type</Label>
-            <select
-              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-              value={mediaType}
-              onChange={(e) => setMediaType(e.target.value as "art" | "music")}
-            >
+            <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={mediaType} onChange={(e) => setMediaType(e.target.value as "art" | "music")}> 
               <option value="art">Art</option>
               <option value="music">Music</option>
             </select>
           </div>
-
           <div className="space-y-1">
             <Label>Department</Label>
             <Input value={department} onChange={(e) => setDepartment(e.target.value)} placeholder="e.g. Design" />
           </div>
-
           <div className="md:col-span-2 space-y-1">
             <Label>{mediaType === "art" ? "Artwork file" : "Audio file"}</Label>
-            <Input
-              ref={mediaRef}
-              type="file"
-              accept={mediaType === "art" ? "image/*" : "audio/*"}
-              onChange={(e) => setMediaFile(e.target.files?.[0] ?? null)}
-              required
-            />
+            <Input ref={mediaRef} type="file" accept={mediaType === "art" ? "image/*" : "audio/*"} onChange={(e) => setMediaFile(e.target.files?.[0] ?? null)} required />
           </div>
-
           <div className="md:col-span-1 space-y-1">
             <Label>Thumbnail (optional)</Label>
             <Input ref={thumbRef} type="file" accept="image/*" onChange={(e) => setThumbFile(e.target.files?.[0] ?? null)} />
           </div>
-
           <div className="md:col-span-1 flex items-end">
             <Button type="submit" disabled={uploading} className="w-full">
               <Upload className="mr-2 h-4 w-4" /> {uploading ? "Uploading..." : "Upload"}
@@ -393,6 +383,8 @@ export default function ArtMusic() {
                     onShare={() => shareItem(art.id, art.title)}
                     onLoadComments={() => loadComments(art.id)}
                     onAddComment={(text) => addComment(art.id, text)}
+                    isOwner={user?.id === art.user_id}
+                    onDelete={() => deleteItem(art.id)}
                   />
                 ))}
               </div>
@@ -408,18 +400,9 @@ export default function ArtMusic() {
             ) : (
               <div className="space-y-3">
                 {musicItems.map((track, i) => (
-                  <motion.div
-                    key={track.id}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: i * 0.1 }}
-                    className="rounded-xl border border-border bg-card p-4 shadow-card"
-                  >
+                  <motion.div key={track.id} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.1 }} className="rounded-xl border border-border bg-card p-4 shadow-card">
                     <div className="flex items-center gap-4">
-                      <button
-                        onClick={() => toggleTrackPlayback(track.id)}
-                        className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground"
-                      >
+                      <button onClick={() => toggleTrackPlayback(track.id)} className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
                         {playingTrackId === track.id ? <Pause className="h-5 w-5" /> : <Play className="ml-0.5 h-5 w-5" />}
                       </button>
                       <div className="min-w-0 flex-1">
@@ -427,7 +410,6 @@ export default function ArtMusic() {
                         <p className="text-sm text-muted-foreground">Campus musician · {track.department ?? "General"}</p>
                       </div>
                     </div>
-
                     <audio
                       ref={(el) => {
                         audioRefs.current[track.id] = el;
@@ -449,25 +431,20 @@ export default function ArtMusic() {
                       <source src={track.media_url} type={inferAudioType(track.media_url)} />
                       Your browser does not support the audio element.
                     </audio>
-
                     <div className="mt-3 flex items-center gap-2">
-                      <Button size="sm" variant={likedIds.has(track.id) ? "default" : "outline"} onClick={() => toggleLike(track.id)}>
-                        <Heart className="mr-1 h-4 w-4" /> {track.likes_count}
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => loadComments(track.id)}>
-                        <MessageCircle className="mr-1 h-4 w-4" /> Comments
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => shareItem(track.id, track.title)}>
-                        <Share2 className="mr-1 h-4 w-4" /> Share
-                      </Button>
+                      <Button size="sm" variant={likedIds.has(track.id) ? "default" : "outline"} onClick={() => toggleLike(track.id)}><Heart className="mr-1 h-4 w-4" /> {track.likes_count}</Button>
+                      <Button size="sm" variant="outline" onClick={() => loadComments(track.id)}><MessageCircle className="mr-1 h-4 w-4" /> Comments</Button>
+                      <Button size="sm" variant="outline" onClick={() => shareItem(track.id, track.title)}><Share2 className="mr-1 h-4 w-4" /> Share</Button>
+                      {user?.id === track.user_id ? (
+                        <Button size="sm" variant="outline" onClick={() => deleteItem(track.id)} className="text-destructive hover:text-destructive">
+                          <Trash2 className="mr-1 h-4 w-4" /> Delete
+                        </Button>
+                      ) : null}
                     </div>
-
                     {(commentsMap[track.id] ?? []).length > 0 ? (
                       <div className="mt-2 space-y-1 text-xs text-muted-foreground">
                         {(commentsMap[track.id] ?? []).slice(-3).map((c) => (
-                          <p key={c.id}>
-                            <span className="font-semibold text-foreground">{c.author}:</span> {c.text}
-                          </p>
+                          <p key={c.id}><span className="font-semibold text-foreground">{c.author}:</span> {c.text}</p>
                         ))}
                       </div>
                     ) : null}

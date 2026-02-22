@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import SectionHeader from "@/components/shared/SectionHeader";
 import { Button } from "@/components/ui/button";
-import { Upload, Play, Heart, MessageCircle, Star, Share2 } from "lucide-react";
+import { Upload, Play, Heart, MessageCircle, Star, Share2, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -16,6 +16,7 @@ type Film = {
   thumbnail_url: string | null;
   likes_count: number;
   is_approved: boolean;
+  user_id: string;
 };
 
 type FilmComment = { id: string; text: string; author: string };
@@ -43,7 +44,7 @@ export default function Films() {
   const loadFilms = async () => {
     const { data } = await supabase
       .from("films")
-      .select("id, title, thumbnail_url, likes_count, is_approved")
+      .select("id, title, thumbnail_url, likes_count, is_approved, user_id")
       .order("created_at", { ascending: false });
 
     if (data) setFilms(data);
@@ -112,6 +113,44 @@ export default function Films() {
     }
   };
 
+  const deleteFilm = async (filmId: string) => {
+    const target = films.find((film) => film.id === filmId);
+    if (!target || !user || target.user_id !== user.id) return;
+
+    await supabase.from("comments").delete().eq("content_type", "film").eq("content_id", filmId);
+
+    const { error } = await supabase.from("films").delete().eq("id", filmId).eq("user_id", user.id);
+    if (error) {
+      toast({ title: "Delete failed", description: error.message, variant: "destructive" });
+      return;
+    }
+
+    const thumbnailPath = target.thumbnail_url?.split("/object/public/films/")[1] ?? null;
+    if (thumbnailPath) {
+      await supabase.storage.from("films").remove([thumbnailPath]);
+    }
+
+    setFilms((prev) => prev.filter((film) => film.id !== filmId));
+    setCommentsMap((prev) => {
+      const next = { ...prev };
+      delete next[filmId];
+      return next;
+    });
+    setCommentTextMap((prev) => {
+      const next = { ...prev };
+      delete next[filmId];
+      return next;
+    });
+    setLikedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(filmId);
+      localStorage.setItem("film-liked", JSON.stringify([...next]));
+      return next;
+    });
+
+    toast({ title: "Film deleted", description: "Your film post has been removed." });
+  };
+
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
@@ -164,11 +203,11 @@ export default function Films() {
     setUploading(false);
   };
 
-  const featured = useMemo(() => films.filter((f) => f.is_approved).slice(0, 2), [films]);
+  const featured = useMemo(() => films.slice(0, 2), [films]);
 
   return (
     <div className="container py-8">
-      <SectionHeader title="Short Films" subtitle="Student-made films and documentaries" className="mb-0" />
+      <SectionHeader title="Films" subtitle="Short films, documentaries, and creative videos" className="mb-0" />
 
       {!user ? (
         <p className="mt-2 text-sm text-muted-foreground">
@@ -226,6 +265,11 @@ export default function Films() {
                         <Button size="sm" variant={likedIds.has(film.id) ? "default" : "outline"} onClick={() => toggleLike(film.id)}><Heart className="mr-1 h-4 w-4" /> {film.likes_count}</Button>
                         <Button size="sm" variant="outline" onClick={() => loadComments(film.id)}><MessageCircle className="mr-1 h-4 w-4" /> Comments</Button>
                         <Button size="sm" variant="outline" onClick={() => shareFilm(film.id, film.title)}><Share2 className="mr-1 h-4 w-4" /> Share</Button>
+                        {user?.id === film.user_id ? (
+                          <Button size="sm" variant="outline" onClick={() => deleteFilm(film.id)} className="text-destructive hover:text-destructive">
+                            <Trash2 className="mr-1 h-4 w-4" /> Delete
+                          </Button>
+                        ) : null}
                       </div>
                       <div className="mt-2 flex gap-2">
                         <Input className="h-8 text-xs" placeholder="Write a comment" value={commentTextMap[film.id] ?? ""} onChange={(e) => setCommentTextMap((prev) => ({ ...prev, [film.id]: e.target.value }))} />
@@ -255,6 +299,11 @@ export default function Films() {
                         <Button size="sm" variant={likedIds.has(film.id) ? "default" : "ghost"} onClick={() => toggleLike(film.id)}><Heart className="h-4 w-4" /></Button>
                         <Button size="sm" variant="ghost" onClick={() => loadComments(film.id)}><MessageCircle className="h-4 w-4" /></Button>
                         <Button size="sm" variant="ghost" onClick={() => shareFilm(film.id, film.title)}><Share2 className="h-4 w-4" /></Button>
+                        {user?.id === film.user_id ? (
+                          <Button size="sm" variant="ghost" onClick={() => deleteFilm(film.id)} className="text-destructive hover:text-destructive">
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        ) : null}
                       </div>
                     </div>
                   </motion.div>
