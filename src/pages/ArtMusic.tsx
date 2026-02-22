@@ -27,7 +27,7 @@ const categories = ["All", "art", "music"];
 
 export default function ArtMusic() {
   const [active, setActive] = useState("All");
-  const [playingIndex, setPlayingIndex] = useState<number | null>(null);
+  const [playingTrackId, setPlayingTrackId] = useState<string | null>(null);
   const [items, setItems] = useState<ArtMusicItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -41,12 +41,51 @@ export default function ArtMusic() {
   const [likedIds, setLikedIds] = useState<Set<string>>(() => new Set(JSON.parse(localStorage.getItem("art-liked") ?? "[]")));
   const mediaRef = useRef<HTMLInputElement>(null);
   const thumbRef = useRef<HTMLInputElement>(null);
+  const audioRefs = useRef<Record<string, HTMLAudioElement | null>>({});
   const { user } = useAuth();
   const { toast } = useToast();
 
   const persistLiked = (next: Set<string>) => {
     setLikedIds(next);
     localStorage.setItem("art-liked", JSON.stringify([...next]));
+  };
+
+  const inferAudioType = (url: string) => {
+    const clean = url.split("?")[0].toLowerCase();
+    if (clean.endsWith(".mp3")) return "audio/mpeg";
+    if (clean.endsWith(".wav")) return "audio/wav";
+    if (clean.endsWith(".ogg")) return "audio/ogg";
+    if (clean.endsWith(".m4a")) return "audio/mp4";
+    if (clean.endsWith(".aac")) return "audio/aac";
+    if (clean.endsWith(".flac")) return "audio/flac";
+    return "audio/mpeg";
+  };
+
+  const inferUploadContentType = (file: File, type: "art" | "music") => {
+    if (file.type) return file.type;
+    const ext = (file.name.split(".").pop() ?? "").toLowerCase();
+
+    if (type === "music") {
+      const map: Record<string, string> = {
+        mp3: "audio/mpeg",
+        wav: "audio/wav",
+        ogg: "audio/ogg",
+        m4a: "audio/mp4",
+        aac: "audio/aac",
+        flac: "audio/flac",
+      };
+      return map[ext] ?? "audio/mpeg";
+    }
+
+    const imageMap: Record<string, string> = {
+      jpg: "image/jpeg",
+      jpeg: "image/jpeg",
+      png: "image/png",
+      webp: "image/webp",
+      gif: "image/gif",
+      avif: "image/avif",
+    };
+    return imageMap[ext] ?? "application/octet-stream";
   };
 
   const loadItems = async () => {
@@ -71,18 +110,32 @@ export default function ArtMusic() {
       .eq("content_type", "art")
       .eq("content_id", id)
       .order("created_at", { ascending: true });
+
     if (data) {
       const userIds = [...new Set(data.map((c) => c.user_id))];
       const { data: profiles } = await supabase.from("profiles").select("user_id, full_name").in("user_id", userIds);
       const nameMap = new Map((profiles ?? []).map((p) => [p.user_id, p.full_name]));
-      setCommentsMap((prev) => ({ ...prev, [id]: data.map((c) => ({ id: c.id, text: c.text, author: nameMap.get(c.user_id) ?? "Student" })) }));
+      setCommentsMap((prev) => ({
+        ...prev,
+        [id]: data.map((c) => ({
+          id: c.id,
+          text: c.text,
+          author: nameMap.get(c.user_id) ?? "Student",
+        })),
+      }));
     }
+
     setCommentLoadingMap((prev) => ({ ...prev, [id]: false }));
   };
 
   const addComment = async (id: string, text: string) => {
     if (!user) return;
-    const { error } = await supabase.from("comments").insert({ user_id: user.id, content_type: "art", content_id: id, text });
+    const { error } = await supabase.from("comments").insert({
+      user_id: user.id,
+      content_type: "art",
+      content_id: id,
+      text,
+    });
     if (error) {
       toast({ title: "Comment failed", description: error.message, variant: "destructive" });
       return;
@@ -93,17 +146,61 @@ export default function ArtMusic() {
   const toggleLike = async (id: string) => {
     const item = items.find((i) => i.id === id);
     if (!item) return;
+
     const isLiked = likedIds.has(id);
     const nextCount = Math.max(0, item.likes_count + (isLiked ? -1 : 1));
+
     const { error } = await supabase.from("art_music").update({ likes_count: nextCount }).eq("id", id);
     if (error) {
       toast({ title: "Like failed", description: error.message, variant: "destructive" });
       return;
     }
+
     setItems((prev) => prev.map((i) => (i.id === id ? { ...i, likes_count: nextCount } : i)));
     const next = new Set(likedIds);
-    if (isLiked) next.delete(id); else next.add(id);
+    if (isLiked) next.delete(id);
+    else next.add(id);
     persistLiked(next);
+  };
+
+  const toggleTrackPlayback = async (trackId: string) => {
+    const targetAudio = audioRefs.current[trackId];
+    if (!targetAudio) {
+      toast({
+        title: "Audio unavailable",
+        description: "This track cannot be played right now.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (playingTrackId === trackId) {
+      targetAudio.pause();
+      targetAudio.currentTime = 0;
+      setPlayingTrackId(null);
+      return;
+    }
+
+    Object.entries(audioRefs.current).forEach(([id, audio]) => {
+      if (!audio) return;
+      if (id !== trackId) {
+        audio.pause();
+        audio.currentTime = 0;
+      }
+    });
+
+    try {
+      targetAudio.load();
+      await targetAudio.play();
+      setPlayingTrackId(trackId);
+    } catch {
+      toast({
+        title: "Playback failed",
+        description: "Browser blocked autoplay. Click play again.",
+        variant: "destructive",
+      });
+      setPlayingTrackId(null);
+    }
   };
 
   const shareItem = async (id: string, postTitle: string) => {
@@ -120,7 +217,11 @@ export default function ArtMusic() {
     e.preventDefault();
     if (!user) return;
     if (!title.trim() || !mediaFile) {
-      toast({ title: "Missing details", description: "Please add title and media file.", variant: "destructive" });
+      toast({
+        title: "Missing details",
+        description: "Please add title and media file.",
+        variant: "destructive",
+      });
       return;
     }
 
@@ -131,7 +232,7 @@ export default function ArtMusic() {
 
     const mediaUpload = await supabase.storage.from("art-music").upload(mediaPath, mediaFile, {
       upsert: false,
-      contentType: mediaFile.type || undefined,
+      contentType: inferUploadContentType(mediaFile, mediaType),
     });
 
     if (mediaUpload.error) {
@@ -148,11 +249,13 @@ export default function ArtMusic() {
         upsert: false,
         contentType: thumbFile.type || "image/jpeg",
       });
+
       if (thumbUpload.error) {
         toast({ title: "Thumbnail failed", description: thumbUpload.error.message, variant: "destructive" });
         setUploading(false);
         return;
       }
+
       thumbnail_url = supabase.storage.from("art-music").getPublicUrl(thumbPath).data.publicUrl;
     }
 
@@ -200,7 +303,11 @@ export default function ArtMusic() {
 
       {!user ? (
         <p className="mt-2 text-sm text-muted-foreground">
-          Please <Link to="/login" className="text-primary underline">sign in</Link> to upload art/music.
+          Please{" "}
+          <Link to="/login" className="text-primary underline">
+            sign in
+          </Link>{" "}
+          to upload art/music.
         </p>
       ) : (
         <form onSubmit={handleUpload} className="mt-4 grid gap-3 rounded-xl border border-border bg-card p-4 md:grid-cols-4">
@@ -208,25 +315,40 @@ export default function ArtMusic() {
             <Label>Title</Label>
             <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Work title" required />
           </div>
+
           <div className="space-y-1">
             <Label>Type</Label>
-            <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={mediaType} onChange={(e) => setMediaType(e.target.value as "art" | "music")}> 
+            <select
+              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              value={mediaType}
+              onChange={(e) => setMediaType(e.target.value as "art" | "music")}
+            >
               <option value="art">Art</option>
               <option value="music">Music</option>
             </select>
           </div>
+
           <div className="space-y-1">
             <Label>Department</Label>
             <Input value={department} onChange={(e) => setDepartment(e.target.value)} placeholder="e.g. Design" />
           </div>
+
           <div className="md:col-span-2 space-y-1">
             <Label>{mediaType === "art" ? "Artwork file" : "Audio file"}</Label>
-            <Input ref={mediaRef} type="file" accept={mediaType === "art" ? "image/*" : "audio/*"} onChange={(e) => setMediaFile(e.target.files?.[0] ?? null)} required />
+            <Input
+              ref={mediaRef}
+              type="file"
+              accept={mediaType === "art" ? "image/*" : "audio/*"}
+              onChange={(e) => setMediaFile(e.target.files?.[0] ?? null)}
+              required
+            />
           </div>
+
           <div className="md:col-span-1 space-y-1">
             <Label>Thumbnail (optional)</Label>
             <Input ref={thumbRef} type="file" accept="image/*" onChange={(e) => setThumbFile(e.target.files?.[0] ?? null)} />
           </div>
+
           <div className="md:col-span-1 flex items-end">
             <Button type="submit" disabled={uploading} className="w-full">
               <Upload className="mr-2 h-4 w-4" /> {uploading ? "Uploading..." : "Upload"}
@@ -286,25 +408,66 @@ export default function ArtMusic() {
             ) : (
               <div className="space-y-3">
                 {musicItems.map((track, i) => (
-                  <motion.div key={track.id} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.1 }} className="rounded-xl border border-border bg-card p-4 shadow-card">
+                  <motion.div
+                    key={track.id}
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: i * 0.1 }}
+                    className="rounded-xl border border-border bg-card p-4 shadow-card"
+                  >
                     <div className="flex items-center gap-4">
-                      <button onClick={() => setPlayingIndex(playingIndex === i ? null : i)} className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
-                        {playingIndex === i ? <Pause className="h-5 w-5" /> : <Play className="ml-0.5 h-5 w-5" />}
+                      <button
+                        onClick={() => toggleTrackPlayback(track.id)}
+                        className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground"
+                      >
+                        {playingTrackId === track.id ? <Pause className="h-5 w-5" /> : <Play className="ml-0.5 h-5 w-5" />}
                       </button>
                       <div className="min-w-0 flex-1">
                         <h3 className="truncate font-display font-semibold text-foreground">{track.title}</h3>
                         <p className="text-sm text-muted-foreground">Campus musician · {track.department ?? "General"}</p>
                       </div>
                     </div>
+
+                    <audio
+                      ref={(el) => {
+                        audioRefs.current[track.id] = el;
+                      }}
+                      preload="metadata"
+                      className="mt-3 w-full"
+                      controls
+                      onPlay={() => setPlayingTrackId(track.id)}
+                      onPause={() => setPlayingTrackId((prev) => (prev === track.id ? null : prev))}
+                      onEnded={() => setPlayingTrackId((prev) => (prev === track.id ? null : prev))}
+                      onError={() => {
+                        toast({
+                          title: "Audio format issue",
+                          description: "This track could not be decoded in your browser. Re-upload as MP3 for best compatibility.",
+                          variant: "destructive",
+                        });
+                      }}
+                    >
+                      <source src={track.media_url} type={inferAudioType(track.media_url)} />
+                      Your browser does not support the audio element.
+                    </audio>
+
                     <div className="mt-3 flex items-center gap-2">
-                      <Button size="sm" variant={likedIds.has(track.id) ? "default" : "outline"} onClick={() => toggleLike(track.id)}><Heart className="mr-1 h-4 w-4" /> {track.likes_count}</Button>
-                      <Button size="sm" variant="outline" onClick={() => loadComments(track.id)}><MessageCircle className="mr-1 h-4 w-4" /> Comments</Button>
-                      <Button size="sm" variant="outline" onClick={() => shareItem(track.id, track.title)}><Share2 className="mr-1 h-4 w-4" /> Share</Button>
+                      <Button size="sm" variant={likedIds.has(track.id) ? "default" : "outline"} onClick={() => toggleLike(track.id)}>
+                        <Heart className="mr-1 h-4 w-4" /> {track.likes_count}
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => loadComments(track.id)}>
+                        <MessageCircle className="mr-1 h-4 w-4" /> Comments
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => shareItem(track.id, track.title)}>
+                        <Share2 className="mr-1 h-4 w-4" /> Share
+                      </Button>
                     </div>
+
                     {(commentsMap[track.id] ?? []).length > 0 ? (
                       <div className="mt-2 space-y-1 text-xs text-muted-foreground">
                         {(commentsMap[track.id] ?? []).slice(-3).map((c) => (
-                          <p key={c.id}><span className="font-semibold text-foreground">{c.author}:</span> {c.text}</p>
+                          <p key={c.id}>
+                            <span className="font-semibold text-foreground">{c.author}:</span> {c.text}
+                          </p>
                         ))}
                       </div>
                     ) : null}
